@@ -1,6 +1,11 @@
 {{template "header"}}
 <body>
 <p>Hello {{.Email}}!</p>
+{{ if .SubscriberStatus }}
+<p>Status: Subscribed</p>
+{{ else }}
+<p>Status: UNSUBSCRIBED</p>
+{{ end }}
 <a href="/logout">Logout</a>
 </body>
 </html>
