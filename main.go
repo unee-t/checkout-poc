@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/apex/log"
@@ -107,7 +108,9 @@ func hook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	key := fmt.Sprintf("hooks/%s.txt", time.Now().Format("2006-01-02T15:04:05Z"))
+	t := time.Now()
+	ips := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
+	key := fmt.Sprintf("hooks/%s/%s-%d.txt", t.Format("2006-01-02"), strings.TrimSpace(ips[0]), t.Unix())
 	hookout, err := b.NewWriter(ctx, key, nil)
 	if err != nil {
 		log.Fatalf("Failed to obtain writer: %s", err)
