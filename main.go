@@ -7,10 +7,20 @@ import (
 	"time"
 
 	"github.com/apex/log"
+	jsonloghandler "github.com/apex/log/handlers/json"
+	"github.com/apex/log/handlers/text"
 	"github.com/gorilla/mux"
 )
 
 var views = template.Must(template.ParseGlob("templates/*.html"))
+
+func init() {
+	if os.Getenv("UP_STAGE") != "" {
+		log.SetHandler(jsonloghandler.Default)
+	} else {
+		log.SetHandler(text.Default)
+	}
+}
 
 func main() {
 	addr := ":" + os.Getenv("PORT")
