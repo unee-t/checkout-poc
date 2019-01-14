@@ -1,14 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"html/template"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"net/http/httputil"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/apex/log"
@@ -21,6 +22,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/gorilla/mux"
 	"github.com/stripe/stripe-go/webhook"
+	"github.com/tj/go/http/response"
 	"gocloud.dev/blob"
 	"gocloud.dev/blob/s3blob"
 )
@@ -128,13 +130,15 @@ func dump(key string, payload []byte) (err error) {
 
 func hook(w http.ResponseWriter, r *http.Request) {
 
-	body, err := ioutil.ReadAll(r.Body)
+	buf := &bytes.Buffer{}
+	tee := io.TeeReader(r.Body, buf)
+
+	body, err := ioutil.ReadAll(tee)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	// Pass the request body & Stripe-Signature header to ConstructEvent, along with the webhook signing key
 	event, err := webhook.ConstructEvent(body, r.Header.Get("Stripe-Signature"), os.Getenv("WH_SIGNING_SECRET"))
 
 	if err != nil {
@@ -143,7 +147,7 @@ func hook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Infof("Received signed event: %v", event)
+	log.Infof("Received signed event: %#v", event)
 
 	payload, err := httputil.DumpRequest(r, true)
 	if err != nil {
@@ -152,8 +156,7 @@ func hook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	t := time.Now()
-	ips := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
-	key := fmt.Sprintf("hooks/%s/%s-%d.txt", t.Format("2006-01-02"), strings.TrimSpace(ips[0]), t.Unix())
+	key := fmt.Sprintf("hooks/%s/%d-%s.txt", t.Format("2006-01-02"), t.Unix(), event.Type)
 
 	err = dump(key, payload)
 	if err != nil {
@@ -161,7 +164,7 @@ func hook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
+	response.OK(w)
 }
 
 func deletecookie(w http.ResponseWriter, r *http.Request) {
