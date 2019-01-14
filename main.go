@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"html/template"
+	"io/ioutil"
 	"net/http"
 	"net/http/httputil"
 	"os"
@@ -19,6 +20,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/ec2metadata"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/gorilla/mux"
+	"github.com/stripe/stripe-go/webhook"
 	"gocloud.dev/blob"
 	"gocloud.dev/blob/s3blob"
 )
@@ -93,17 +95,58 @@ func postlogin(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
-func hook(w http.ResponseWriter, r *http.Request) {
-	payload, err := httputil.DumpRequest(r, true)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+func dump(key string, payload []byte) (err error) {
 
 	ctx := context.Background()
 	b, err := setupAWS(ctx, bucket)
 	if err != nil {
 		log.Errorf("Failed to setup bucket: %s", err)
+		return err
+	}
+
+	hookout, err := b.NewWriter(ctx, key, nil)
+	if err != nil {
+		log.Fatalf("Failed to obtain writer: %s", err)
+		return err
+	}
+
+	_, err = hookout.Write(payload)
+	if err != nil {
+		log.Fatalf("Failed to write to bucket: %s", err)
+		return err
+	}
+	if err := hookout.Close(); err != nil {
+		log.Fatalf("Failed to close: %s", err)
+		return err
+	}
+
+	log.Infof("Wrote out to s3://%s/%s", bucket, key)
+
+	return nil
+
+}
+
+func hook(w http.ResponseWriter, r *http.Request) {
+
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Pass the request body & Stripe-Signature header to ConstructEvent, along with the webhook signing key
+	event, err := webhook.ConstructEvent(body, r.Header.Get("Stripe-Signature"), os.Getenv("WH_SIGNING_SECRET"))
+
+	if err != nil {
+		log.Fatalf("Failed to verify signature: %s", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	log.Infof("Received signed event: %v", event)
+
+	payload, err := httputil.DumpRequest(r, true)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -111,26 +154,14 @@ func hook(w http.ResponseWriter, r *http.Request) {
 	t := time.Now()
 	ips := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
 	key := fmt.Sprintf("hooks/%s/%s-%d.txt", t.Format("2006-01-02"), strings.TrimSpace(ips[0]), t.Unix())
-	hookout, err := b.NewWriter(ctx, key, nil)
-	if err != nil {
-		log.Fatalf("Failed to obtain writer: %s", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
 
-	_, err = hookout.Write(payload)
+	err = dump(key, payload)
 	if err != nil {
 		log.Fatalf("Failed to write to bucket: %s", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if err := hookout.Close(); err != nil {
-		log.Fatalf("Failed to close: %s", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
 
-	log.Infof("Wrote out to s3://%s/%s", bucket, key)
 }
 
 func deletecookie(w http.ResponseWriter, r *http.Request) {
