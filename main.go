@@ -1,14 +1,10 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"fmt"
 	"html/template"
-	"io"
 	"io/ioutil"
 	"net/http"
-	"net/http/httputil"
 	"os"
 	"time"
 
@@ -88,12 +84,10 @@ func getlogin(w http.ResponseWriter, r *http.Request) {
 
 func postlogin(w http.ResponseWriter, r *http.Request) {
 	email := r.FormValue("email")
-
 	http.SetCookie(w, &http.Cookie{
 		Name:  "email",
 		Value: email,
 	})
-
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
@@ -129,41 +123,18 @@ func dump(key string, payload []byte) (err error) {
 }
 
 func hook(w http.ResponseWriter, r *http.Request) {
-
-	buf := &bytes.Buffer{}
-	tee := io.TeeReader(r.Body, buf)
-
-	body, err := ioutil.ReadAll(tee)
+	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-
 	event, err := webhook.ConstructEvent(body, r.Header.Get("Stripe-Signature"), os.Getenv("WH_SIGNING_SECRET"))
-
 	if err != nil {
 		log.Fatalf("Failed to verify signature: %s", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-
 	log.Infof("Received signed event: %#v", event)
-
-	payload, err := httputil.DumpRequest(r, true)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	t := time.Now()
-	key := fmt.Sprintf("hooks/%s/%d-%s.txt", t.Format("2006-01-02"), t.Unix(), event.Type)
-
-	err = dump(key, payload)
-	if err != nil {
-		log.Fatalf("Failed to write to bucket: %s", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
 	response.OK(w)
 }
 
@@ -175,7 +146,6 @@ func deletecookie(w http.ResponseWriter, r *http.Request) {
 		Expires:  time.Unix(0, 0),
 		HttpOnly: true,
 	}
-
 	http.SetCookie(w, c)
 	http.Redirect(w, r, "/login", http.StatusFound)
 }
