@@ -1,8 +1,8 @@
 {{template "header"}}
 <body>
-<h2>Customer: {{.Email}}!</h2>
+<h3>Customer: {{.Email}}!</h3>
 {{ if .SubscriberStatus }}
-<p>Status: Subscribed</p>
+<h4>Status: Subscribed</h4>
 <body>
 <form action="/cancel" method="post">
 <input type="submit" value="Cancel subscription and delete customer">

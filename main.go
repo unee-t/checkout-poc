@@ -61,35 +61,39 @@ func cancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	subID, err := load(email.Value)
+	if err != nil {
+		log.Errorf("Failed to load customer record using subID: %s", subID)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	log.WithFields(log.Fields{
 		"subID": subID,
 		"email": email.Value,
 	}).Info("cancel")
 
+	c, err := sub2customer(string(subID))
 	if err != nil {
 		log.Errorf("Failed to load customer email: %s", email.Value)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	c, err := sub2customer(string(subID))
+	err = delcustomer(c.ID, email.Value)
+	http.Redirect(w, r, "/", http.StatusFound)
+}
+
+func delcustomer(custID string, email string) (err error) {
+	_, err = customer.Del(custID, nil)
 	if err != nil {
-		log.Errorf("Failed to load customer record using subID: %s", subID)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	_, err = customer.Del(c.ID, nil)
-	if err != nil {
-		log.Errorf("Failed to delete customer ID: %s", c.ID)
+		log.Errorf("Failed to delete customer ID: %s", custID)
 		// Continue to delete customer record from bucket
 	}
-	err = del(email.Value)
+	err = del(email)
 	if err != nil {
-		log.Errorf("Failed to delete customer email: %s", c.Email)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		log.Errorf("Failed to delete customer email: %s", email)
 		return
 	}
-	http.Redirect(w, r, "/", http.StatusFound)
+	return
 }
 
 func index(w http.ResponseWriter, r *http.Request) {
@@ -160,17 +164,17 @@ func save(key string, payload string) (err error) {
 		log.Errorf("Failed to setup bucket: %s", err)
 		return err
 	}
-	hookout, err := b.NewWriter(ctx, key, nil)
+	saveme, err := b.NewWriter(ctx, key, nil)
 	if err != nil {
 		log.Errorf("Failed to obtain writer: %s", err)
 		return err
 	}
-	_, err = hookout.Write([]byte(payload))
+	_, err = saveme.Write([]byte(payload))
 	if err != nil {
 		log.Errorf("Failed to write to bucket: %s", err)
 		return err
 	}
-	if err := hookout.Close(); err != nil {
+	if err := saveme.Close(); err != nil {
 		log.Errorf("Failed to close: %s", err)
 		return err
 	}
@@ -211,9 +215,6 @@ func load(key string) (payload []byte, err error) {
 
 func hook(w http.ResponseWriter, r *http.Request) {
 
-	log.SetLevel(log.DebugLevel)
-	log.Debugf("%s is a string", "a string")
-
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		log.Errorf("Failed to parse body: %s", err)
@@ -235,15 +236,51 @@ func hook(w http.ResponseWriter, r *http.Request) {
 			log.Errorf("Failed to retrieve subscription id from %s", event.ID)
 			return
 		}
-		customer, err := sub2customer(subID)
+		cust, err := sub2customer(subID)
 		if err != nil {
 			log.Errorf("Failed to retrieve customer email from %s", subID)
 			return
 		}
 		// We save the subscription ID, although the customer ID is probably of more import
-		err = save(customer.Email, subID)
+		err = save(cust.Email, subID)
 		if err != nil {
-			log.Errorf("Failed to record customer %s as subscribing to %s", customer.Email, subID)
+			log.Errorf("Failed to record customer %s as subscribing to %s", cust.Email, subID)
+			return
+		}
+	case "customer.deleted":
+		// We need to to remove the earlier saved customer record from the bucket
+		id, _ := event.Data.Object["id"].(string)
+		email, ok := event.Data.Object["email"].(string)
+		if !ok {
+			log.Errorf("Failed to retrieve customer email %s", event.ID)
+			return
+		}
+		err = delcustomer(id, email)
+		if err != nil {
+			log.WithFields(log.Fields{
+				"customerID": id,
+				"email":      email,
+			}).Error("deleting from customer.deleted")
+			return
+		}
+	case "customer.subscription.deleted":
+		subID, ok := event.Data.Object["id"].(string)
+		if !ok {
+			log.Errorf("Failed to retrieve subscription id from %s", event.ID)
+			return
+		}
+		// Will result in ignorable errors if customer is closed simultaneously
+		cust, err := sub2customer(subID)
+		if err != nil {
+			log.Warnf("Failed to retrieve customer email from %s", subID)
+			return
+		}
+		err = delcustomer(cust.ID, cust.Email)
+		if err != nil {
+			log.WithFields(log.Fields{
+				"customerID": cust.ID,
+				"email":      cust.Email,
+			}).Error("cancel from customer.subscription.deleted")
 			return
 		}
 	default:
