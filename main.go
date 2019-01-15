@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"html/template"
 	"io/ioutil"
 	"net/http"
@@ -17,6 +18,9 @@ import (
 	"github.com/aws/aws-sdk-go/aws/ec2metadata"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/gorilla/mux"
+	stripe "github.com/stripe/stripe-go"
+	"github.com/stripe/stripe-go/customer"
+	"github.com/stripe/stripe-go/sub"
 	"github.com/stripe/stripe-go/webhook"
 	"github.com/tj/go/http/response"
 	"gocloud.dev/blob"
@@ -32,6 +36,7 @@ func init() {
 	} else {
 		log.SetHandler(text.Default)
 	}
+	stripe.Key = os.Getenv("STRIPE_SECRET_KEY")
 }
 
 func main() {
@@ -40,12 +45,51 @@ func main() {
 	app.HandleFunc("/", index)
 	app.HandleFunc("/logout", deletecookie)
 	app.HandleFunc("/hook", hook)
+	app.HandleFunc("/cancel", cancel)
 	app.HandleFunc("/login", getlogin).Methods("GET")
 	app.HandleFunc("/login", postlogin).Methods("POST")
 
 	if err := http.ListenAndServe(addr, app); err != nil {
 		log.WithError(err).Fatal("error listening")
 	}
+}
+
+func cancel(w http.ResponseWriter, r *http.Request) {
+	email, err := r.Cookie("email")
+	if err != nil || email.Value == "" {
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+	subID, err := load(email.Value)
+
+	log.WithFields(log.Fields{
+		"subID": subID,
+		"email": email.Value,
+	}).Info("cancel")
+
+	if err != nil {
+		log.Errorf("Failed to load customer email: %s", email.Value)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	c, err := sub2customer(string(subID))
+	if err != nil {
+		log.Errorf("Failed to load customer record using subID: %s", subID)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	_, err = customer.Del(c.ID, nil)
+	if err != nil {
+		log.Errorf("Failed to delete customer ID: %s", c.ID)
+		// Continue to delete customer record from bucket
+	}
+	err = del(email.Value)
+	if err != nil {
+		log.Errorf("Failed to delete customer email: %s", c.Email)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/", http.StatusFound)
 }
 
 func index(w http.ResponseWriter, r *http.Request) {
@@ -62,12 +106,13 @@ func index(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
 	userinfo, err := b.ReadAll(ctx, email.Value)
 	var status string
 	if err != nil {
 		log.Warnf("Failed to access user info: %s", email.Value)
 	}
-	log.Infof("userinfo: %+v", userinfo)
+	status = string(userinfo)
 
 	views.ExecuteTemplate(w, "index.html", struct {
 		Email            string
@@ -91,51 +136,137 @@ func postlogin(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
-func dump(key string, payload []byte) (err error) {
-
+func del(key string) (err error) {
+	if key == "" {
+		return fmt.Errorf("Empty key")
+	}
 	ctx := context.Background()
 	b, err := setupAWS(ctx, bucket)
 	if err != nil {
 		log.Errorf("Failed to setup bucket: %s", err)
 		return err
 	}
-
-	hookout, err := b.NewWriter(ctx, key, nil)
+	err = b.Delete(ctx, key)
 	if err != nil {
-		log.Fatalf("Failed to obtain writer: %s", err)
+		log.Errorf("Failed to delete: %s", key)
+	}
+	return
+}
+
+func save(key string, payload string) (err error) {
+	ctx := context.Background()
+	b, err := setupAWS(ctx, bucket)
+	if err != nil {
+		log.Errorf("Failed to setup bucket: %s", err)
 		return err
 	}
-
-	_, err = hookout.Write(payload)
+	hookout, err := b.NewWriter(ctx, key, nil)
 	if err != nil {
-		log.Fatalf("Failed to write to bucket: %s", err)
+		log.Errorf("Failed to obtain writer: %s", err)
+		return err
+	}
+	_, err = hookout.Write([]byte(payload))
+	if err != nil {
+		log.Errorf("Failed to write to bucket: %s", err)
 		return err
 	}
 	if err := hookout.Close(); err != nil {
-		log.Fatalf("Failed to close: %s", err)
+		log.Errorf("Failed to close: %s", err)
 		return err
 	}
-
 	log.Infof("Wrote out to s3://%s/%s", bucket, key)
-
 	return nil
+}
+
+func load(key string) (payload []byte, err error) {
+
+	ctx := context.Background()
+	b, err := setupAWS(ctx, bucket)
+	if err != nil {
+		log.Errorf("Failed to setup bucket: %s", err)
+		return payload, err
+	}
+
+	r, err := b.NewReader(ctx, key, nil)
+	if err != nil {
+		log.Errorf("Failed to obtain reader: %s", err)
+		return payload, err
+	}
+
+	payload, err = ioutil.ReadAll(r)
+	if err != nil {
+		log.Errorf("Failed to read from bucket: %s", err)
+		return payload, err
+	}
+	if err := r.Close(); err != nil {
+		log.Errorf("Failed to close: %s", err)
+		return payload, err
+	}
+
+	log.Infof("Read from to s3://%s/%s = %q", bucket, key, string(payload))
+
+	return
 
 }
 
 func hook(w http.ResponseWriter, r *http.Request) {
+
+	log.SetLevel(log.DebugLevel)
+	log.Debugf("%s is a string", "a string")
+
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
+		log.Errorf("Failed to parse body: %s", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	event, err := webhook.ConstructEvent(body, r.Header.Get("Stripe-Signature"), os.Getenv("WH_SIGNING_SECRET"))
 	if err != nil {
-		log.Fatalf("Failed to verify signature: %s", err)
+		log.Errorf("Failed to verify signature: %s", err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	log.Infof("Received signed event: %#v", event)
+	log.Debugf("Received signed event: %#v", event)
+
+	switch event.Type {
+	case "checkout_beta.session_succeeded":
+		subID, ok := event.Data.Object["subscription"].(string)
+		if !ok {
+			log.Errorf("Failed to retrieve subscription id from %s", event.ID)
+			return
+		}
+		customer, err := sub2customer(subID)
+		if err != nil {
+			log.Errorf("Failed to retrieve customer email from %s", subID)
+			return
+		}
+		// We save the subscription ID, although the customer ID is probably of more import
+		err = save(customer.Email, subID)
+		if err != nil {
+			log.Errorf("Failed to record customer %s as subscribing to %s", customer.Email, subID)
+			return
+		}
+	default:
+		log.Infof("Ignoring: %s", event.Type)
+	}
 	response.OK(w)
+}
+
+func sub2customer(subID string) (c *stripe.Customer, err error) {
+	s, err := sub.Get(subID, nil)
+	if err != nil {
+		log.Errorf("Failed to retrieve subscription id %s", subID)
+		return
+	}
+	log.Infof("Subscription info: %#v", s)
+	log.Infof("Customer info from subscription: %#v", s.Customer)
+	c, err = customer.Get(s.Customer.ID, nil)
+	if err != nil {
+		log.Errorf("Failed to retrieve customer id %s", s.Customer.ID)
+		return
+	}
+	log.Infof("Customer info: %#v", c)
+	return c, err
 }
 
 func deletecookie(w http.ResponseWriter, r *http.Request) {

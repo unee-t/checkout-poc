@@ -1,10 +1,41 @@
 {{template "header"}}
 <body>
-<p>Hello {{.Email}}!</p>
+<h2>Customer: {{.Email}}!</h2>
 {{ if .SubscriberStatus }}
 <p>Status: Subscribed</p>
+<body>
+<form action="/cancel" method="post">
+<input type="submit" value="Cancel subscription and delete customer">
+</form>
+<p>We delete the customer because if we go through the <a href="https://stripe.com/docs/payments/checkout">simple checkout again</a>, a new customer withe same email address identifier is created.</p>
 {{ else }}
 <p>Status: UNSUBSCRIBED</p>
+
+<script src="https://js.stripe.com/v3"></script>
+<button id="checkout-button">Subscribe</button>
+<div id="error-message"></div>
+
+<script>
+  var stripe = Stripe('pk_test_J9o1nZV3hyuto56DCj9zbOoU', {
+    betas: ['checkout_beta_4']
+  });
+
+  var checkoutButton = document.getElementById('checkout-button');
+  checkoutButton.addEventListener('click', function () {
+    stripe.redirectToCheckout({
+      items: [{plan: 'plan_DkkuE9Mw78AS5u', quantity: 1}],
+      successUrl: 'https://sub.dev.unee-t.com',
+      cancelUrl: 'https://sub.dev.unee-t.com',
+    })
+    .then(function (result) {
+      if (result.error) {
+        var displayError = document.getElementById('error-message');
+        displayError.textContent = result.error.message;
+      }
+    });
+  });
+</script>
+
 {{ end }}
 <a href="/logout">Logout</a>
 </body>

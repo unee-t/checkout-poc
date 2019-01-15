@@ -12,5 +12,9 @@
   ],
   "error_pages": {
     "disable": true
+  },
+  "environment": {
+    "WH_SIGNING_SECRET": "$WH_SIGNING_SECRET",
+    "STRIPE_SECRET_KEY": "$STRIPE_SECRET_KEY"
   }
 }
