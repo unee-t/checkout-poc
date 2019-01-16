@@ -164,18 +164,9 @@ func save(key string, payload string) (err error) {
 		log.Errorf("Failed to setup bucket: %s", err)
 		return err
 	}
-	saveme, err := b.NewWriter(ctx, key, nil)
-	if err != nil {
-		log.Errorf("Failed to obtain writer: %s", err)
-		return err
-	}
-	_, err = saveme.Write([]byte(payload))
+	err = b.WriteAll(ctx, key, []byte(payload), nil)
 	if err != nil {
 		log.Errorf("Failed to write to bucket: %s", err)
-		return err
-	}
-	if err := saveme.Close(); err != nil {
-		log.Errorf("Failed to close: %s", err)
 		return err
 	}
 	log.Infof("Wrote out to s3://%s/%s", bucket, key)
@@ -183,7 +174,6 @@ func save(key string, payload string) (err error) {
 }
 
 func load(key string) (payload []byte, err error) {
-
 	ctx := context.Background()
 	b, err := setupAWS(ctx, bucket)
 	if err != nil {
