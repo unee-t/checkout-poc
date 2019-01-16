@@ -18,11 +18,11 @@ import (
 	"github.com/aws/aws-sdk-go/aws/ec2metadata"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/gorilla/mux"
+	"github.com/pkg/errors"
 	stripe "github.com/stripe/stripe-go"
 	"github.com/stripe/stripe-go/customer"
 	"github.com/stripe/stripe-go/sub"
 	"github.com/stripe/stripe-go/webhook"
-	"github.com/tj/go/http/response"
 	"gocloud.dev/blob"
 	"gocloud.dev/blob/s3blob"
 )
@@ -114,24 +114,16 @@ func delcustomer(custID string, email string) (err error) {
 }
 
 func index(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
 	email, err := r.Cookie("email")
 	if err != nil || email.Value == "" {
 		http.Redirect(w, r, "/login", http.StatusFound)
 		return
 	}
 
-	b, err := setupAWS(ctx, bucket)
-	if err != nil {
-		log.Errorf("Failed to setup bucket: %s", err)
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	userinfo, err := b.ReadAll(ctx, email.Value)
 	var status string
+	userinfo, err := load(email.Value)
 	if err != nil {
-		log.Warnf("Failed to access user info: %s", email.Value)
+		log.WithField("email", email.Value).Warnf("No record: %s", err)
 	}
 	status = string(userinfo)
 
@@ -194,24 +186,18 @@ func load(key string) (payload []byte, err error) {
 	ctx := context.Background()
 	b, err := setupAWS(ctx, bucket)
 	if err != nil {
-		log.Errorf("Failed to setup bucket: %s", err)
-		return payload, err
+		return payload, errors.Wrap(err, "bucket setup")
 	}
 
 	r, err := b.NewReader(ctx, key, nil)
 	if err != nil {
-		log.Errorf("Failed to obtain reader: %s", err)
-		return payload, err
+		return payload, errors.Wrap(err, "no reader")
 	}
 
+	// https://godoc.org/gocloud.dev/blob#Bucket.ReadAll
 	payload, err = ioutil.ReadAll(r)
 	if err != nil {
-		log.Errorf("Failed to read from bucket: %s", err)
-		return payload, err
-	}
-	if err := r.Close(); err != nil {
-		log.Errorf("Failed to close: %s", err)
-		return payload, err
+		return payload, errors.Wrap(err, "failed to read")
 	}
 
 	log.Infof("Read from to s3://%s/%s = %q", bucket, key, string(payload))
@@ -293,7 +279,7 @@ func hook(w http.ResponseWriter, r *http.Request) {
 	default:
 		log.Infof("Ignoring: %s", event.Type)
 	}
-	response.OK(w)
+	w.WriteHeader(http.StatusOK)
 }
 
 func sub2customer(subID string) (c *stripe.Customer, err error) {

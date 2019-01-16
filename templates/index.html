@@ -12,7 +12,10 @@
 So instead we accept the 1:1 mapping and just remove customers without active subscriptions.</p>
 
 {{ else }}
-<p>Status: UNSUBSCRIBED</p>
+<h4>Status: UNSUBSCRIBED</h4>
+
+<p>If you subscribed under a different email address to {{.Email}}, please let
+us know, so we can associate the billing email with your user email.</p>
 
 <script src="https://js.stripe.com/v3"></script>
 <button id="checkout-button">Subscribe</button>
