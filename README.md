@@ -1,4 +1,8 @@
-Premise: Minimum POC to integrate with BETA https://stripe.com/docs/payments/checkout
+Video about it: https://youtu.be/0zFcxszKHHw
+
+Premise: Minimum POC to integrate with BETA
+https://stripe.com/docs/payments/checkout which is not to be confused with the
+old [checkout.js](https://stripe.com/docs/checkout) (modal) flow.
 
 # Problem 1: If user adds a different billing email address
 
