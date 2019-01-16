@@ -45,6 +45,7 @@ func main() {
 	app.HandleFunc("/", index)
 	app.HandleFunc("/logout", deletecookie)
 	app.HandleFunc("/hook", hook)
+	app.HandleFunc("/success", success)
 	app.HandleFunc("/cancel", cancel)
 	app.HandleFunc("/login", getlogin).Methods("GET")
 	app.HandleFunc("/login", postlogin).Methods("POST")
@@ -52,6 +53,22 @@ func main() {
 	if err := http.ListenAndServe(addr, app); err != nil {
 		log.WithError(err).Fatal("error listening")
 	}
+}
+
+func routeLog(r *http.Request) *log.Entry {
+	l := log.WithFields(log.Fields{
+		"method":     r.Method,
+		"requestURI": r.RequestURI,
+		"referer":    r.Referer(),
+		"ua":         r.UserAgent(),
+	})
+	return l
+}
+
+func success(w http.ResponseWriter, r *http.Request) {
+	log := routeLog(r)
+	log.Info("success")
+	views.ExecuteTemplate(w, "success.html", nil)
 }
 
 func cancel(w http.ResponseWriter, r *http.Request) {

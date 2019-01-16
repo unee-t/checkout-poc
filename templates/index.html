@@ -1,13 +1,16 @@
 {{template "header"}}
 <body>
-<h3>Customer: {{.Email}}!</h3>
+<h3>Customer: {{.Email}}</h3>
 {{ if .SubscriberStatus }}
 <h4>Status: Subscribed</h4>
 <body>
 <form action="/cancel" method="post">
 <input type="submit" value="Cancel subscription and delete customer">
 </form>
-<p>We delete the customer because if we go through the <a href="https://stripe.com/docs/payments/checkout">simple checkout again</a>, a new customer withe same email address identifier is created.</p>
+
+<p>We delete the customer because if we go through the <a href="https://stripe.com/docs/payments/checkout">simple checkout again</a>, a new customer with the same email address identifier is created. This is pretty confusing to have customers with same email and different Stripe customer ids. 
+So instead we accept the 1:1 mapping and just remove customers without active subscriptions.</p>
+
 {{ else }}
 <p>Status: UNSUBSCRIBED</p>
 
@@ -24,7 +27,7 @@
   checkoutButton.addEventListener('click', function () {
     stripe.redirectToCheckout({
       items: [{plan: 'plan_DkkuE9Mw78AS5u', quantity: 1}],
-      successUrl: 'https://sub.dev.unee-t.com',
+      successUrl: 'https://sub.dev.unee-t.com/success',
       cancelUrl: 'https://sub.dev.unee-t.com',
     })
     .then(function (result) {
@@ -37,6 +40,6 @@
 </script>
 
 {{ end }}
-<a href="/logout">Logout</a>
-</body>
-</html>
+<a href="/logout"><button>Logout</button></a>
+
+{{template "footer"}}
