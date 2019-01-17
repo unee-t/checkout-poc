@@ -79,38 +79,31 @@ func cancel(w http.ResponseWriter, r *http.Request) {
 	}
 	subID, err := load(email.Value)
 	if err != nil {
-		log.Errorf("Failed to load customer record using subID: %s", subID)
+		log.WithField("email", email.Value).Errorf("Failed to load subID")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	log.WithFields(log.Fields{
+	log := log.WithFields(log.Fields{
 		"subID": subID,
 		"email": email.Value,
-	}).Info("cancel")
+	})
 
-	c, err := sub2customer(string(subID))
+	_, err = sub.Cancel(string(subID), nil)
 	if err != nil {
-		log.Errorf("Failed to load customer email: %s", email.Value)
+		log.Error("failed to cancel")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	err = delcustomer(c.ID, email.Value)
-	http.Redirect(w, r, "/", http.StatusFound)
-}
-
-func delcustomer(custID string, email string) (err error) {
-	_, err = customer.Del(custID, nil)
+	log.Info("cancelled")
+	err = del(email.Value)
 	if err != nil {
-		log.Errorf("Failed to delete customer ID: %s", custID)
-		// Continue to delete customer record from bucket
-	}
-	err = del(email)
-	if err != nil {
-		log.Errorf("Failed to delete customer email: %s", email)
+		log.Errorf("failed to remove s3://%s/%s", bucket, email.Value)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	return
+	log.Info("removed S3 user record")
+	http.Redirect(w, r, "/", http.StatusFound)
 }
 
 func index(w http.ResponseWriter, r *http.Request) {
@@ -238,42 +231,6 @@ func hook(w http.ResponseWriter, r *http.Request) {
 		err = save(cust.Email, subID)
 		if err != nil {
 			log.Errorf("Failed to record customer %s as subscribing to %s", cust.Email, subID)
-			return
-		}
-	case "customer.deleted":
-		// We need to to remove the earlier saved customer record from the bucket
-		id, _ := event.Data.Object["id"].(string)
-		email, ok := event.Data.Object["email"].(string)
-		if !ok {
-			log.Errorf("Failed to retrieve customer email %s", event.ID)
-			return
-		}
-		err = delcustomer(id, email)
-		if err != nil {
-			log.WithFields(log.Fields{
-				"customerID": id,
-				"email":      email,
-			}).Error("deleting from customer.deleted")
-			return
-		}
-	case "customer.subscription.deleted":
-		subID, ok := event.Data.Object["id"].(string)
-		if !ok {
-			log.Errorf("Failed to retrieve subscription id from %s", event.ID)
-			return
-		}
-		// Will result in ignorable errors if customer is closed simultaneously
-		cust, err := sub2customer(subID)
-		if err != nil {
-			log.Warnf("Failed to retrieve customer email from %s", subID)
-			return
-		}
-		err = delcustomer(cust.ID, cust.Email)
-		if err != nil {
-			log.WithFields(log.Fields{
-				"customerID": cust.ID,
-				"email":      cust.Email,
-			}).Error("cancel from customer.subscription.deleted")
 			return
 		}
 	default:

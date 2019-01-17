@@ -5,13 +5,11 @@
 <h4>Status: Subscribed</h4>
 <body>
 <form action="/cancel" method="post">
-<input type="submit" value="Cancel subscription and delete customer">
+<input type="submit" value="Cancel subscription">
 </form>
 
-<p>We delete the customer because if we go through the <a href="https://stripe.com/docs/payments/checkout">simple checkout again</a>, a new customer with the same email address identifier is created. This is pretty confusing to have customers with same email and different Stripe customer ids. 
-So instead we accept the 1:1 mapping and just remove customers without active subscriptions.</p>
-
 {{ else }}
+
 <h4>Status: UNSUBSCRIBED</h4>
 
 <p>If you subscribed under a different email address to {{.Email}}, please let

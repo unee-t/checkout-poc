@@ -1,28 +1,20 @@
 Video about it: https://youtu.be/0zFcxszKHHw
 
-Premise: Minimum POC to integrate with BETA
+Premise: Minimum POC to integrate with **checkout_beta_4**
 https://stripe.com/docs/payments/checkout which is not to be confused with the
 old [checkout.js](https://stripe.com/docs/checkout) (modal) flow.
 
-# Problem 1: If user adds a different billing email address
+# Problem: If user adds a different billing email address
 
-Stripe's answer:
+This should be fixed soon according to Stripe.
 
-	If you want your customers to be able to enter email address in advance, you'd
-	need to use Custom Checkout here:
-	https://stripe.com/docs/checkout#integration-custom.
+# Problem: Takes time for the Web hook to acknowledge the user is successfully subscribed
 
-# Problem 2: It can take time for user to become subscribed
+We use a /success end point, and we wait on the Webhook source of truth.
+However perhaps we can look at the referer for added confirmation.
 
-Ask user to refresh after paying?
+# Problem: If a subscription is cancelled, customer is still around
 
-Waste time on a "success" / thank you page ?
-
-# Problem 3: customer.subscription.created doesn't exist yet on BETA checkout
-
-Workaround use checkout_beta.session_succeeded
-
-# Problem 4: customer.subscription.deleted won't work if customer is closed
-
-Workaround, add some logic to handle "customer.deleted" and delete customer
-record on s3://$bucket/$email.
+We will remove s3://$bucket/$email containing the subscription ID in the case
+the subscription is cancelled. However, the customer will still exist and would
+need to be manually cleared up.
