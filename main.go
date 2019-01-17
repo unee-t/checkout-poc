@@ -45,6 +45,7 @@ func main() {
 	app.HandleFunc("/", index)
 	app.HandleFunc("/logout", deletecookie)
 	app.HandleFunc("/hook", hook)
+	app.HandleFunc("/admin/missingsubs", missingsubs)
 	app.HandleFunc("/success", success)
 	app.HandleFunc("/cancel", cancel)
 	app.HandleFunc("/login", getlogin).Methods("GET")
@@ -65,6 +66,24 @@ func routeLog(r *http.Request) *log.Entry {
 	return l
 }
 
+func missingsubs(w http.ResponseWriter, r *http.Request) {
+	type customers struct{ Customers []*stripe.Customer }
+	log.Info("missing subs")
+
+	var missingSubs customers
+
+	i := customer.List(&stripe.CustomerListParams{})
+	for i.Next() {
+		c := i.Customer()
+		if len(c.Subscriptions.Data) == 0 {
+			log.WithField("customerID", c.ID).Info("no subscribers")
+			missingSubs.Customers = append(missingSubs.Customers, c)
+		}
+	}
+	views.ExecuteTemplate(w, "customers.html", missingSubs)
+}
+
+// User waits here until the Web hook comes in updating the s3://$bucket/$email file
 func success(w http.ResponseWriter, r *http.Request) {
 	log := routeLog(r)
 	log.Info("success")
@@ -113,19 +132,17 @@ func index(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var status string
-	userinfo, err := load(email.Value)
+	subID, err := load(email.Value)
 	if err != nil {
 		log.WithField("email", email.Value).Warnf("No record: %s", err)
 	}
-	status = string(userinfo)
 
 	views.ExecuteTemplate(w, "index.html", struct {
-		Email            string
-		SubscriberStatus string
+		Email        string
+		SubscriberID string
 	}{
-		Email:            email.Value,
-		SubscriberStatus: status,
+		Email:        email.Value,
+		SubscriberID: subID,
 	})
 }
 
@@ -175,7 +192,7 @@ func save(key string, payload string) (err error) {
 	return nil
 }
 
-func load(key string) (payload []byte, err error) {
+func load(key string) (payload string, err error) {
 	ctx := context.Background()
 	b, err := setupAWS(ctx, bucket)
 	if err != nil {
@@ -188,12 +205,13 @@ func load(key string) (payload []byte, err error) {
 	}
 
 	// https://godoc.org/gocloud.dev/blob#Bucket.ReadAll
-	payload, err = ioutil.ReadAll(r)
+	payloadbytes, err := ioutil.ReadAll(r)
 	if err != nil {
 		return payload, errors.Wrap(err, "failed to read")
 	}
+	payload = string(payloadbytes)
 
-	log.Infof("Read from to s3://%s/%s = %q", bucket, key, string(payload))
+	log.Infof("Read from to s3://%s/%s = %q", bucket, key, payload)
 
 	return
 
@@ -207,6 +225,7 @@ func hook(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
 	event, err := webhook.ConstructEvent(body, r.Header.Get("Stripe-Signature"), os.Getenv("WH_SIGNING_SECRET"))
 	if err != nil {
 		log.Errorf("Failed to verify signature: %s", err)
@@ -216,7 +235,10 @@ func hook(w http.ResponseWriter, r *http.Request) {
 	log.Debugf("Received signed event: %#v", event)
 
 	switch event.Type {
+	case "customer.subscription.created":
+		log.Infof("YAY YAY YAY %s", event.Type)
 	case "checkout_beta.session_succeeded":
+		log.Infof("%s", event.Type)
 		subID, ok := event.Data.Object["subscription"].(string)
 		if !ok {
 			log.Errorf("Failed to retrieve subscription id from %s", event.ID)
@@ -227,7 +249,7 @@ func hook(w http.ResponseWriter, r *http.Request) {
 			log.Errorf("Failed to retrieve customer email from %s", subID)
 			return
 		}
-		// We save the subscription ID, although the customer ID is probably of more import
+		// We save the subscription ID
 		err = save(cust.Email, subID)
 		if err != nil {
 			log.Errorf("Failed to record customer %s as subscribing to %s", cust.Email, subID)
@@ -239,14 +261,15 @@ func hook(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// Given a subscription ID, look up the customer, namely for their email address which is used as the identifier
 func sub2customer(subID string) (c *stripe.Customer, err error) {
 	s, err := sub.Get(subID, nil)
 	if err != nil {
 		log.Errorf("Failed to retrieve subscription id %s", subID)
 		return
 	}
-	log.Infof("Subscription info: %#v", s)
-	log.Infof("Customer info from subscription: %#v", s.Customer)
+	log.Debugf("Subscription info: %#v", s)
+	log.Debugf("Customer info from subscription: %#v", s.Customer)
 	c, err = customer.Get(s.Customer.ID, nil)
 	if err != nil {
 		log.Errorf("Failed to retrieve customer id %s", s.Customer.ID)
@@ -256,6 +279,7 @@ func sub2customer(subID string) (c *stripe.Customer, err error) {
 	return c, err
 }
 
+// To log out
 func deletecookie(w http.ResponseWriter, r *http.Request) {
 	c := &http.Cookie{
 		Name:     "email",
@@ -268,6 +292,7 @@ func deletecookie(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/login", http.StatusFound)
 }
 
+// Using the AWS cloud
 func setupAWS(ctx context.Context, bucket string) (b *blob.Bucket, err error) {
 	sess := session.New()
 	profile := os.Getenv("AWS_PROFILE")

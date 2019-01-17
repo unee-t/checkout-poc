@@ -1,0 +1,13 @@
+{{template "header"}}
+
+<h1>Customers without Active subscriptions</h1>
+
+<ol>
+{{ range .Customers }}
+<li>
+	<a href="https://dashboard.stripe.com/test/customers/{{ .ID }}">{{ .Email }}</a>
+</li>
+{{ end }}
+</ol>
+
+{{template "footer"}}

@@ -1,7 +1,7 @@
 {{template "header"}}
 <body>
 <h3>Customer: {{.Email}}</h3>
-{{ if .SubscriberStatus }}
+{{ if .SubscriberID }}
 <h4>Status: Subscribed</h4>
 <body>
 <form action="/cancel" method="post">

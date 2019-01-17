@@ -17,4 +17,5 @@ However perhaps we can look at the referer for added confirmation.
 
 We will remove s3://$bucket/$email containing the subscription ID in the case
 the subscription is cancelled. However, the customer will still exist and would
-need to be manually cleared up.
+need to be manually cleared up. We adopt this strategy since we might want
+cases where is a billing entity (aka a customer) with multiple subscriptions.
