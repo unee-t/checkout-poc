@@ -99,9 +99,8 @@ func sorry(w http.ResponseWriter, r *http.Request) {
 }
 
 func cancel(w http.ResponseWriter, r *http.Request) {
-	// If the customer has one associated active subscription, we delete the customer which automatically deletes the sub & payment src
-	// Customer with more than one subscriber?
-	// Could be used as a billing contact to subscribe another user with the same billing info, only remove subscription
+	// Assuming the customer has only one associated active subscription,
+	// we delete the customer which automatically deletes the sub & payment src
 
 	// Identify
 	email, err := r.Cookie("email")
@@ -130,32 +129,11 @@ func cancel(w http.ResponseWriter, r *http.Request) {
 		"customerID":   cust.ID,
 	})
 
-	// Sanity check, there should be one subscription for one customer normally
-	if len(cust.Subscriptions.Data) == 1 {
-		// Also check meta?
-		// Note this will also cancel the associated subscription
-		_, err := customer.Del(cust.ID, &stripe.CustomerParams{})
-		if err != nil {
-			log.Errorf("failed to delete customer")
-			return
-		}
-	} else {
-		// BONUS
-		// We have this IN CASE we decide to allow a single customer to have many subscribers
-		log.Warnf("%d subscriptions", len(cust.Subscriptions.Data))
-		_, err := sub.Cancel(subID, nil)
-		if err != nil {
-			log.Errorf("failed to cancel subscriber")
-			return
-		}
-		// Remove the state that tells us this user is paying
-		err = del(email.Value)
-		if err != nil {
-			log.Errorf("failed to remove s3://%s/%s", bucket, email.Value)
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		log.WithField("email", email.Value).Info("removed S3 user record")
+	// Assuming customer is not a company type, with a varying quantity of subscriptions
+	_, err = customer.Del(cust.ID, &stripe.CustomerParams{})
+	if err != nil {
+		log.Errorf("failed to delete customer")
+		return
 	}
 
 	// We don't redirect immediately to the user status page, because the user record actually only gets updated once
@@ -276,6 +254,7 @@ func hook(w http.ResponseWriter, r *http.Request) {
 	case "customer.subscription.created":
 		log.Infof("WOW time to replace checkout_beta.session_succeeded?? %s", event.Type)
 	case "customer.deleted":
+		log.Info("customer.deleted")
 		email, ok := event.Data.Object["email"].(string)
 		if !ok {
 			log.Errorf("Failed to retrieve email id from %s", event.ID)
@@ -327,7 +306,7 @@ func sub2customer(subID string) (c *stripe.Customer, err error) {
 		log.Errorf("Failed to retrieve customer id %s", s.Customer.ID)
 		return
 	}
-	log.Infof("Customer info: %#v", c)
+	log.Debugf("Customer info: %#v", c)
 	return c, err
 }
 

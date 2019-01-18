@@ -10,12 +10,16 @@ This should be fixed soon according to Stripe.
 
 # Problem: Takes time for the Web hook to acknowledge the user is successfully subscribed
 
-We use a /success end point, and we wait on the Webhook source of truth.
-However perhaps we can look at the referer for added confirmation.
+We use a /success end point for subscribing and a /sorry end point for cancellation.
+We wait on the Webhook source of truth.
 
-# Problem: If a subscription is cancelled, customer is still around
+# Problem: When a customer becomes a company
 
-We will remove s3://$bucket/$email containing the subscription ID in the case
-the subscription is cancelled. However, the customer will still exist and would
-need to be manually cleared up. We adopt this strategy since we might want
-cases where is a billing entity (aka a customer) with multiple subscriptions.
+If the 1 customer to 1 subscription mapping changes, i.e. a customer is a
+business with several users in its account, we need to move to:
+https://stripe.com/docs/billing/subscriptions/quantities or
+https://stripe.com/docs/billing/subscriptions/metered-billing
+
+This effectively complicates our logic since we need to **report** to Stripe
+how much the business utilises our service. i.e. we can't rely on Stripe Web
+hooks to update our user table on events, whether a user is subscribed or not.
