@@ -1,8 +1,6 @@
 package main
 
 import (
-	"context"
-	"fmt"
 	"html/template"
 	"io/ioutil"
 	"net/http"
@@ -12,19 +10,11 @@ import (
 	"github.com/apex/log"
 	jsonloghandler "github.com/apex/log/handlers/json"
 	"github.com/apex/log/handlers/text"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/credentials"
-	"github.com/aws/aws-sdk-go/aws/credentials/ec2rolecreds"
-	"github.com/aws/aws-sdk-go/aws/ec2metadata"
-	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/gorilla/mux"
-	"github.com/pkg/errors"
 	stripe "github.com/stripe/stripe-go"
 	"github.com/stripe/stripe-go/customer"
 	"github.com/stripe/stripe-go/sub"
 	"github.com/stripe/stripe-go/webhook"
-	"gocloud.dev/blob"
-	"gocloud.dev/blob/s3blob"
 )
 
 var bucket = "uneet-checkout-test"
@@ -46,7 +36,6 @@ func main() {
 	app.HandleFunc("/logout", deletecookie)
 	app.HandleFunc("/hook", hook)
 	app.HandleFunc("/sorry", sorry)
-	app.HandleFunc("/admin/missingsubs", missingsubs)
 	app.HandleFunc("/success", success)
 	app.HandleFunc("/cancel", cancel)
 	app.HandleFunc("/login", getlogin).Methods("GET")
@@ -57,7 +46,7 @@ func main() {
 	}
 }
 
-func routeLog(r *http.Request) *log.Entry {
+func accessLog(r *http.Request) *log.Entry {
 	l := log.WithFields(log.Fields{
 		"method":     r.Method,
 		"requestURI": r.RequestURI,
@@ -67,33 +56,16 @@ func routeLog(r *http.Request) *log.Entry {
 	return l
 }
 
-func missingsubs(w http.ResponseWriter, r *http.Request) {
-	type customers struct{ Customers []*stripe.Customer }
-	log.Info("missing subs")
-
-	var missingSubs customers
-
-	i := customer.List(&stripe.CustomerListParams{})
-	for i.Next() {
-		c := i.Customer()
-		if len(c.Subscriptions.Data) == 0 {
-			log.WithField("customerID", c.ID).Info("no subscribers")
-			missingSubs.Customers = append(missingSubs.Customers, c)
-		}
-	}
-	views.ExecuteTemplate(w, "customers.html", missingSubs)
-}
-
 // User waits here until the Web hook comes in updating the s3://$bucket/$email file
 func success(w http.ResponseWriter, r *http.Request) {
-	log := routeLog(r)
+	log := accessLog(r)
 	log.Info("success")
 	views.ExecuteTemplate(w, "success.html", nil)
 }
 
 // User waits here until the Web hook comes in updating the s3://$bucket/$email file
 func sorry(w http.ResponseWriter, r *http.Request) {
-	log := routeLog(r)
+	log := accessLog(r)
 	log.Info("sorry")
 	views.ExecuteTemplate(w, "sorry.html", nil)
 }
@@ -173,64 +145,6 @@ func postlogin(w http.ResponseWriter, r *http.Request) {
 		Value: email,
 	})
 	http.Redirect(w, r, "/", http.StatusFound)
-}
-
-func del(key string) (err error) {
-	if key == "" {
-		return fmt.Errorf("Empty key")
-	}
-	ctx := context.Background()
-	b, err := setupAWS(ctx, bucket)
-	if err != nil {
-		log.Errorf("Failed to setup bucket: %s", err)
-		return err
-	}
-	err = b.Delete(ctx, key)
-	if err != nil {
-		log.Errorf("Failed to delete: %s", key)
-	}
-	return
-}
-
-func save(key string, payload string) (err error) {
-	ctx := context.Background()
-	b, err := setupAWS(ctx, bucket)
-	if err != nil {
-		log.Errorf("Failed to setup bucket: %s", err)
-		return err
-	}
-	err = b.WriteAll(ctx, key, []byte(payload), nil)
-	if err != nil {
-		log.Errorf("Failed to write to bucket: %s", err)
-		return err
-	}
-	log.Infof("Wrote out to s3://%s/%s", bucket, key)
-	return nil
-}
-
-func load(key string) (payload string, err error) {
-	ctx := context.Background()
-	b, err := setupAWS(ctx, bucket)
-	if err != nil {
-		return payload, errors.Wrap(err, "bucket setup")
-	}
-
-	r, err := b.NewReader(ctx, key, nil)
-	if err != nil {
-		return payload, errors.Wrap(err, "no reader")
-	}
-
-	// https://godoc.org/gocloud.dev/blob#Bucket.ReadAll
-	payloadbytes, err := ioutil.ReadAll(r)
-	if err != nil {
-		return payload, errors.Wrap(err, "failed to read")
-	}
-	payload = string(payloadbytes)
-
-	log.Infof("Read from to s3://%s/%s = %q", bucket, key, payload)
-
-	return
-
 }
 
 func hook(w http.ResponseWriter, r *http.Request) {
@@ -321,30 +235,4 @@ func deletecookie(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, c)
 	http.Redirect(w, r, "/login", http.StatusFound)
-}
-
-// Using the AWS cloud
-func setupAWS(ctx context.Context, bucket string) (b *blob.Bucket, err error) {
-	sess := session.New()
-	profile := os.Getenv("AWS_PROFILE")
-	if profile == "" {
-		profile = "uneet-dev"
-	}
-	creds := credentials.NewChainCredentials(
-		[]credentials.Provider{
-			// If you want to set AWS_ACCESS_KEY_ID & AWS_SECRET_ACCESS_KEY envs
-			&credentials.EnvProvider{},
-			// For when I use cmd/
-			&credentials.SharedCredentialsProvider{Filename: "", Profile: profile},
-			// IIUC, this is how IAM role is assumed in the Lambda env
-			&ec2rolecreds.EC2RoleProvider{Client: ec2metadata.New(sess)},
-		})
-	cfg := &aws.Config{
-		Region:                        aws.String("ap-southeast-1"),
-		Credentials:                   creds,
-		CredentialsChainVerboseErrors: aws.Bool(true),
-	}
-	sess, err = session.NewSession(cfg)
-	b, err = s3blob.OpenBucket(ctx, sess, bucket, nil)
-	return
 }
