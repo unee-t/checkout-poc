@@ -2,7 +2,7 @@
 <body>
 <h3>Customer: {{.Email}}</h3>
 {{ if .SubscriberID }}
-<h4>Status: Subscribed</h4>
+<h4 class="subscribed">Status: Subscribed</h4>
 <body>
 <form action="/cancel" method="post">
 <input type="submit" value="Cancel subscription">
@@ -10,7 +10,7 @@
 
 {{ else }}
 
-<h4>Status: UNSUBSCRIBED</h4>
+<h4 class="unsubscribed">Status: UNSUBSCRIBED</h4>
 
 <p>If you subscribed under a different email address to {{.Email}}, please let
 us know, so we can associate the billing email with your user email.</p>
