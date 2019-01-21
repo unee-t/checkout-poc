@@ -21,12 +21,12 @@ func save(key string, payload string) (err error) {
 	ctx := context.Background()
 	b, err := setupAWS(ctx, bucket)
 	if err != nil {
-		log.Errorf("Failed to setup bucket: %s", err)
+		log.WithError(err).Error("failed to setup bucket")
 		return err
 	}
 	err = b.WriteAll(ctx, key, []byte(payload), nil)
 	if err != nil {
-		log.Errorf("Failed to write to bucket: %s", err)
+		log.WithError(err).Error("failed to write to bucket")
 		return err
 	}
 	log.Infof("Wrote out to s3://%s/%s", bucket, key)
@@ -65,12 +65,12 @@ func del(key string) (err error) {
 	ctx := context.Background()
 	b, err := setupAWS(ctx, bucket)
 	if err != nil {
-		log.Errorf("Failed to setup bucket: %s", err)
+		log.WithError(err).Error("failed to setup bucket")
 		return err
 	}
 	err = b.Delete(ctx, key)
 	if err != nil {
-		log.Errorf("Failed to delete: %s", key)
+		log.WithError(err).Error("failed to delete")
 	}
 	return
 }

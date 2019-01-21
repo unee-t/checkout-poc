@@ -92,7 +92,7 @@ func cancel(w http.ResponseWriter, r *http.Request) {
 	// Get the stripe Customer ID
 	cust, err := sub2customer(subID)
 	if err != nil {
-		log.Errorf("failed to retrieve customer")
+		log.WithError(err).Error("failed to retrieve customer")
 		return
 	}
 
@@ -104,7 +104,7 @@ func cancel(w http.ResponseWriter, r *http.Request) {
 	// Assuming customer is not a company type, with a varying quantity of subscriptions
 	_, err = customer.Del(cust.ID, &stripe.CustomerParams{})
 	if err != nil {
-		log.Errorf("failed to delete customer")
+		log.WithError(err).Error("failed to delete customer")
 		return
 	}
 
@@ -151,14 +151,14 @@ func hook(w http.ResponseWriter, r *http.Request) {
 
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		log.Errorf("Failed to parse body: %s", err)
+		log.WithError(err).Error("failed to parse body")
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	event, err := webhook.ConstructEvent(body, r.Header.Get("Stripe-Signature"), os.Getenv("WH_SIGNING_SECRET"))
 	if err != nil {
-		log.Errorf("Failed to verify signature: %s", err)
+		log.WithError(err).Error("failed to verify signature")
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -171,13 +171,13 @@ func hook(w http.ResponseWriter, r *http.Request) {
 		log.Info("customer.deleted")
 		email, ok := event.Data.Object["email"].(string)
 		if !ok {
-			log.Errorf("Failed to retrieve email id from %s", event.ID)
+			log.WithError(err).WithField("event", event.ID).Error("failed to retrieve email id")
 			return
 		}
 		// Remove the state that tells us our user is paying
 		err = del(email)
 		if err != nil {
-			log.Errorf("failed to remove s3://%s/%s", bucket, email)
+			log.WithError(err).Errorf("failed to remove s3://%s/%s", bucket, email)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -186,18 +186,18 @@ func hook(w http.ResponseWriter, r *http.Request) {
 		log.Infof("%s", event.Type)
 		subID, ok := event.Data.Object["subscription"].(string)
 		if !ok {
-			log.Errorf("Failed to retrieve subscription id from %s", event.ID)
+			log.WithError(err).WithField("event", event.ID).Error("failed to retrieve subscription id")
 			return
 		}
 		cust, err := sub2customer(subID)
 		if err != nil {
-			log.Errorf("Failed to retrieve customer email from %s", subID)
+			log.WithError(err).WithField("subID", subID).Error("failed to retrieve customer email")
 			return
 		}
 		// We save the subscription ID
 		err = save(cust.Email, subID)
 		if err != nil {
-			log.Errorf("Failed to record customer %s as subscribing to %s", cust.Email, subID)
+			log.WithError(err).Errorf("failed to record customer %s as subscribing to %s", cust.Email, subID)
 			return
 		}
 	default:
@@ -210,14 +210,14 @@ func hook(w http.ResponseWriter, r *http.Request) {
 func sub2customer(subID string) (c *stripe.Customer, err error) {
 	s, err := sub.Get(subID, nil)
 	if err != nil {
-		log.Errorf("Failed to retrieve subscription id %s", subID)
+		log.WithError(err).Errorf("failed to retrieve subscription id %s", subID)
 		return
 	}
 	log.Debugf("Subscription info: %#v", s)
 	log.Debugf("Customer info from subscription: %#v", s.Customer)
 	c, err = customer.Get(s.Customer.ID, nil)
 	if err != nil {
-		log.Errorf("Failed to retrieve customer id %s", s.Customer.ID)
+		log.WithError(err).Errorf("failed to retrieve customer id %s", s.Customer.ID)
 		return
 	}
 	log.Debugf("Customer info: %#v", c)
