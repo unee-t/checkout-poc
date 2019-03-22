@@ -164,6 +164,8 @@ func hook(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Debugf("Received signed event: %#v", event)
 
+	// https://stripe.com/docs/payments/checkout/fulfillment
+	// checkout.session.completed
 	switch event.Type {
 	case "customer.subscription.created":
 		log.Infof("WOW time to replace checkout_beta.session_succeeded?? %s", event.Type)
