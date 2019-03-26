@@ -165,10 +165,8 @@ func hook(w http.ResponseWriter, r *http.Request) {
 	log.Debugf("Received signed event: %#v", event)
 
 	// https://stripe.com/docs/payments/checkout/fulfillment
-	// checkout.session.completed
+
 	switch event.Type {
-	case "customer.subscription.created":
-		log.Infof("WOW time to replace checkout_beta.session_succeeded?? %s", event.Type)
 	case "customer.deleted":
 		log.Info("customer.deleted")
 		email, ok := event.Data.Object["email"].(string)
@@ -184,7 +182,7 @@ func hook(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		log.WithField("email", email).Info("removed S3 user record")
-	case "checkout_beta.session_succeeded":
+	case "checkout.session.completed":
 		log.Infof("%s", event.Type)
 		subID, ok := event.Data.Object["subscription"].(string)
 		if !ok {
