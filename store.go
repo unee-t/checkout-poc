@@ -44,6 +44,7 @@ func load(key string) (payload string, err error) {
 	if err != nil {
 		return payload, errors.Wrap(err, "no reader")
 	}
+	defer r.Close()
 
 	// https://godoc.org/gocloud.dev/blob#Bucket.ReadAll
 	payloadbytes, err := ioutil.ReadAll(r)

@@ -119,12 +119,10 @@ func index(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusFound)
 		return
 	}
-
 	subID, err := load(email.Value)
 	if err != nil {
 		log.WithField("email", email.Value).Warnf("No record: %s", err)
 	}
-
 	views.ExecuteTemplate(w, "index.html", struct {
 		Email        string
 		SubscriberID string
@@ -148,14 +146,12 @@ func postlogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func hook(w http.ResponseWriter, r *http.Request) {
-
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		log.WithError(err).Error("failed to parse body")
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-
 	event, err := webhook.ConstructEvent(body, r.Header.Get("Stripe-Signature"), os.Getenv("WH_SIGNING_SECRET"))
 	if err != nil {
 		log.WithError(err).Error("failed to verify signature")
@@ -163,12 +159,11 @@ func hook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Debugf("Received signed event: %#v", event)
-
 	// https://stripe.com/docs/payments/checkout/fulfillment
 
 	switch event.Type {
 	case "customer.deleted":
-		log.Info("customer.deleted")
+		log.WithField("type", event.Type).Info("cancelling")
 		email, ok := event.Data.Object["email"].(string)
 		if !ok {
 			log.WithError(err).WithField("event", event.ID).Error("failed to retrieve email id")
@@ -183,7 +178,7 @@ func hook(w http.ResponseWriter, r *http.Request) {
 		}
 		log.WithField("email", email).Info("removed S3 user record")
 	case "checkout.session.completed":
-		log.Infof("%s", event.Type)
+		log.WithField("type", event.Type).Info("subscribing")
 		subID, ok := event.Data.Object["subscription"].(string)
 		if !ok {
 			log.WithError(err).WithField("event", event.ID).Error("failed to retrieve subscription id")
@@ -195,18 +190,20 @@ func hook(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// We save the subscription ID
+		log.Info("HERE")
 		err = save(cust.Email, subID)
 		if err != nil {
 			log.WithError(err).Errorf("failed to record customer %s as subscribing to %s", cust.Email, subID)
 			return
 		}
 	default:
-		log.Infof("Ignoring: %s", event.Type)
+		log.WithField("type", event.Type).Warn("ignoring")
 	}
 	w.WriteHeader(http.StatusOK)
 }
 
-// Given a subscription ID, look up the customer, namely for their email address which is used as the identifier
+// Given a subscription ID, look up the customer,
+// namely for their email address which is used as the identifier
 func sub2customer(subID string) (c *stripe.Customer, err error) {
 	s, err := sub.Get(subID, nil)
 	if err != nil {
