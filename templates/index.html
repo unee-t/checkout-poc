@@ -20,9 +20,7 @@ us know, so we can associate the billing email with your user email.</p>
 <div id="error-message"></div>
 
 <script>
-  var stripe = Stripe('pk_test_J9o1nZV3hyuto56DCj9zbOoU', {
-    betas: ['checkout_beta_4']
-  });
+  var stripe = Stripe('pk_test_J9o1nZV3hyuto56DCj9zbOoU');
 
   var checkoutButton = document.getElementById('checkout-button');
   checkoutButton.addEventListener('click', function () {
